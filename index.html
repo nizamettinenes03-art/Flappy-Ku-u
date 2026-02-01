@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Süper Flappy Oyunu</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: #2c3e50;
+            overflow: hidden; /* Kaydırma çubuklarını gizle */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        canvas {
+            /* Canvas'ı ekranın boyutuna göre ayarla ama orantıyı bozma */
+            height: 100%;
+            width: auto;
+            max-width: 100%;
+            object-fit: contain; 
+            background-color: #70c5ce;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="oyunAlani" width="320" height="480"></canvas>
+
+<script>
+    // ==========================================
+    // --- KOLAY AYARLAR ---
+    // ==========================================
+    const AYARLAR = {
+        kusGenislik: 60,
+        kusYukseklik: 60,
+        kusCarpisma: 18,
+        yerCekimi: 0.15,
+        ziplamaGucu: -3.5,
+        boruGenislik: 80,
+        boruAraligi: 150,
+        boruSikligi: 120,
+        arkaPlanHizi: 1,
+        bitisResimBoyut: { w: 250, h: 120 }
+    };
+    // ==========================================
+
+    const canvas = document.getElementById("oyunAlani");
+    const ctx = canvas.getContext("2d");
+
+    // --- DOKUNMATİK KONTROLÜ İÇİN ---
+    // Mobilde tıklamayı algılaması için bu ayarı ekliyoruz
+    canvas.addEventListener("touchstart", function(e){
+        e.preventDefault(); // Sayfanın kaymasını engelle
+        zipla();
+    }, {passive: false});
+
+    // --- RESİMLER ---
+    const kusResmi = new Image(); kusResmi.src = "kus.png";
+    const arkaPlanResmi = new Image(); arkaPlanResmi.src = "arkaplan.png"; 
+    const engelResmi = new Image(); engelResmi.src = "engel.png";
+    const engelTersResmi = new Image(); engelTersResmi.src = "engel_ters.png";
+    const baslangicResmi = new Image(); baslangicResmi.src = "baslangic.png";
+    const bitisResmi = new Image(); bitisResmi.src = "bitis.png";
+
+    // --- SESLER ---
+    const sesMuzik = new Audio(); sesMuzik.src = "muzik.mp3"; sesMuzik.loop = true; sesMuzik.volume = 0.5;
+    const sesZipla = new Audio(); sesZipla.src = "zipla.mp3"; sesZipla.volume = 0.8;
+    const sesCarpma = new Audio(); sesCarpma.src = "carpma.mp3";
+
+    // Değişkenler
+    let frames = 0;
+    let bgX = 0; 
+    const DEGREE = Math.PI / 180;
+    
+    // Oyun Durumu
+    const state = { current: 0, getReady: 0, game: 1, over: 2 }
+
+    // KONTROLLER
+    function zipla() {
+        switch(state.current){
+            case state.getReady:
+                state.current = state.game;
+                sesMuzik.currentTime = 0;
+                sesMuzik.play().catch(e => {});
+                bird.flap();
+                sesZipla.currentTime = 0;
+                sesZipla.play().catch(e => {});
+                break;
+            case state.game:
+                bird.flap();
+                sesZipla.currentTime = 0; 
+                sesZipla.play().catch(e => {});
+                break;
+            case state.over:
+                bird.speedReset();
+                pipes.reset();
+                score.reset();
+                state.current = state.getReady;
+                frames = 0;
+                bgX = 0; 
+                break;
+        }
+    }
+
+    window.addEventListener("click", zipla); // PC için
+    window.addEventListener("keydown", function(evt){ if(evt.code === "Space") zipla(); }); // Klavye için
+
+    // --- OYUN NESNELERİ (Aynı Kodlar) ---
+    const bird = {
+        x: 50, y: 150, w: AYARLAR.kusGenislik, h: AYARLAR.kusYukseklik, radius: AYARLAR.kusCarpisma,  
+        frame: 0, gravity: AYARLAR.yerCekimi, jump: AYARLAR.ziplamaGucu, speed: 0, rotation: 0,
+        draw: function() {
+            if (kusResmi.complete && kusResmi.naturalHeight !== 0) {
+                ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.rotation);
+                ctx.drawImage(kusResmi, -this.w/2, -this.h/2, this.w, this.h); ctx.restore();
+            } else {
+                ctx.fillStyle = "red"; ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+            }
+        },
+        flap: function() { this.speed = this.jump; },
+        update: function() {
+            if(state.current == state.getReady){ this.y = 150 + Math.cos(frames/15) * 5; this.rotation = 0; } 
+            else {
+                this.speed += this.gravity; this.y += this.speed;
+                if(this.y + this.h/2 >= canvas.height) { 
+                    this.y = canvas.height - this.h/2;
+                    if(state.current == state.game) { state.current = state.over; sesMuzik.pause(); sesCarpma.play().catch(e => {}); }
+                }
+                if(this.speed >= this.jump){ this.rotation = -15 * DEGREE; } else { this.rotation = 45 * DEGREE; }
+            }
+        },
+        speedReset: function() { this.speed = 0; }
+    }
+
+    const pipes = {
+        position: [], w: AYARLAR.boruGenislik, h: 400, gap: AYARLAR.boruAraligi, dx: 2,
+        draw: function() {
+            for(let i = 0; i < this.position.length; i++){
+                let p = this.position[i];
+                let topY = p.y;
+                let bottomY = p.y + this.h + this.gap;
+                if (engelTersResmi.complete && engelTersResmi.naturalHeight !== 0) ctx.drawImage(engelTersResmi, p.x, topY, this.w, this.h);
+                else { ctx.fillStyle = "green"; ctx.fillRect(p.x, topY, this.w, this.h); }
+                if (engelResmi.complete && engelResmi.naturalHeight !== 0) ctx.drawImage(engelResmi, p.x, bottomY, this.w, this.h);
+                else { ctx.fillStyle = "green"; ctx.fillRect(p.x, bottomY, this.w, this.h); }
+            }
+        },
+        update: function() {
+            if(state.current !== state.game) return;
+            if(frames % AYARLAR.boruSikligi == 0){ this.position.push({ x: canvas.width, y: -150 * (Math.random() + 1) }); }
+            for(let i = 0; i < this.position.length; i++){
+                let p = this.position[i];
+                let bottomPipeY = p.y + this.h + this.gap;
+                if(bird.x + bird.radius > p.x && bird.x - bird.radius < p.x + this.w && bird.y + bird.radius > p.y && bird.y - bird.radius < p.y + this.h){
+                    state.current = state.over; sesMuzik.pause(); sesCarpma.play().catch(e => {});
+                }
+                if(bird.x + bird.radius > p.x && bird.x - bird.radius < p.x + this.w && bird.y + bird.radius > bottomPipeY && bird.y - bird.radius < bottomPipeY + this.h){
+                    state.current = state.over; sesMuzik.pause(); sesCarpma.play().catch(e => {});
+                }
+                p.x -= this.dx;
+                if(p.x + this.w <= 0){ this.position.shift(); score.value += 1; score.best = Math.max(score.value, score.best); }
+            }
+        },
+        reset: function() { this.position = []; }
+    }
+
+    const score = {
+        best: 0, value: 0,
+        draw: function() {
+            ctx.fillStyle = "#FFF"; ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
+            if(state.current == state.game){
+                ctx.font = "35px 'Press Start 2P', cursive"; ctx.fillText(this.value, canvas.width/2 - 20, 80); ctx.strokeText(this.value, canvas.width/2 - 20, 80);
+            } else if(state.current == state.over){
+                ctx.font = "18px 'Press Start 2P', cursive";
+                ctx.fillText("SKOR: " + this.value, 95, 260); ctx.strokeText("SKOR: " + this.value, 95, 260);
+                ctx.fillText("EN İYİ: " + this.best, 70, 300); ctx.strokeText("EN İYİ: " + this.best, 70, 300);
+            }
+        },
+        reset: function() { this.value = 0; }
+    }
+
+    function draw() {
+        if (arkaPlanResmi.complete && arkaPlanResmi.naturalHeight !== 0) {
+            let bgScale = canvas.height / arkaPlanResmi.naturalHeight;
+            let bgWidth = arkaPlanResmi.naturalWidth * bgScale;
+            ctx.drawImage(arkaPlanResmi, bgX, 0, bgWidth, canvas.height);
+            ctx.drawImage(arkaPlanResmi, bgX + bgWidth, 0, bgWidth, canvas.height);
+            if(bgWidth < canvas.width) ctx.drawImage(arkaPlanResmi, bgX + bgWidth*2, 0, bgWidth, canvas.height);
+        } else { ctx.fillStyle = "#70c5ce"; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+        
+        pipes.draw(); bird.draw();
+        
+        if(state.current == state.getReady) {
+            if (baslangicResmi.complete && baslangicResmi.naturalHeight !== 0) { ctx.drawImage(baslangicResmi, 0, 0, canvas.width, canvas.height); } 
+            else { 
+                ctx.fillStyle = "white"; ctx.strokeStyle = "black"; ctx.lineWidth = 3; ctx.textAlign = "center";
+                ctx.font = "30px 'Press Start 2P', cursive"; ctx.fillText("FLAPPY", canvas.width/2, 100); ctx.strokeText("FLAPPY", canvas.width/2, 100);
+                ctx.font = "12px 'Press Start 2P', cursive"; ctx.fillText("BAŞLAMAK İÇİN TIKLA", canvas.width/2, 250);
+            }
+        } else if(state.current == state.over) {
+            if (bitisResmi.complete && bitisResmi.naturalHeight !== 0) {
+                let w = AYARLAR.bitisResimBoyut.w; let h = AYARLAR.bitisResimBoyut.h;
+                ctx.drawImage(bitisResmi, canvas.width/2 - w/2, 80, w, h);
+            } else {
+                ctx.fillStyle = "white"; ctx.strokeStyle = "black"; ctx.lineWidth = 3; ctx.textAlign = "center";
+                ctx.font = "35px 'Press Start 2P', cursive"; ctx.fillText("OYUN", canvas.width/2, 120); ctx.strokeText("OYUN", canvas.width/2, 120);
+                ctx.fillText("BİTTİ", canvas.width/2, 170); ctx.strokeText("BİTTİ", canvas.width/2, 170);
+            }
+            // BUTON
+            const btnX = 60; const btnY = 320; const btnW = 200; const btnH = 50; const border = 4; const shadow = 4;
+            ctx.fillStyle = "#c8641e"; ctx.fillRect(btnX + shadow, btnY + shadow, btnW + 2*border, btnH + 2*border);
+            ctx.fillStyle = "#723f19"; ctx.fillRect(btnX, btnY, btnW + 2*border, btnH + 2*border);
+            ctx.fillStyle = "#e78a41"; ctx.fillRect(btnX + border, btnY + border, btnW, btnH);
+            ctx.fillStyle = "white"; ctx.textAlign = "center"; ctx.font = "14px 'Press Start 2P', cursive";
+            ctx.fillText("TEKRAR OYNA", canvas.width/2, btnY + btnH/2 + border*2); ctx.textAlign = "start";
+        }
+        score.draw();
+    }
+
+    function update() {
+        bird.update(); pipes.update();
+        if(state.current == state.game && arkaPlanResmi.complete && arkaPlanResmi.naturalHeight !== 0) {
+            let bgScale = canvas.height / arkaPlanResmi.naturalHeight; let bgWidth = arkaPlanResmi.naturalWidth * bgScale;
+            bgX -= AYARLAR.arkaPlanHizi; if(bgX <= -bgWidth) bgX = 0;
+        }
+    }
+    function loop() { update(); draw(); frames++; requestAnimationFrame(loop); }
+    loop();
+</script>
+</body>
+</html>
